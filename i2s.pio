@@ -1,0 +1,23 @@
+; data out, clk for the dac, word select.
+
+.program i2s
+.side_set 2
+
+
+; instruction       side set  bin  WS   BLCK
+; outpin, 1             side    0b  0     1      Side select in binary  WS low, BLK high
+
+
+
+leftChan:
+    out pins, 1         side 0b00
+    jmp x-- leftChan    side 0b01
+    out pins, 1         side 0b10
+    set x, 30           side 0b11 
+
+rightChan:
+    out pins, 1         side 0b10
+    jmp x-- rightChan   side 0b11
+    out pins, 1         side 0b00 
+public entry_point:
+    set x, 30           side 0b01

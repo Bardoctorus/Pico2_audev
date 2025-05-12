@@ -1,8 +1,11 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
+#include "hardware/dma.h"
+#include <math.h>
 
-// pio include
+
+// pio generated header file include
 #include "i2s.pio.h"
 
 
@@ -10,13 +13,113 @@
 #define DATA_OUT 6
 #define BCLK 7
 #define WS 8 // LCLK is another name this goes by - basically L/R audio trigger
+// test sine wave defs
+#define SAMPLE_RATE 48000.0f
+#define TONE_HZ 440.0f
+#define SCALE 8388607.0f
+#define AUDIO_BUFFER_SIZE 256
 
-void dataForever(PIO pio, uint sm){
-    while(1){
-        pio_sm_put_blocking(pio, sm, 0xF0F0F0F0); // 32 bit on off on off
+
+int dma_out_ctrl;
+int dma_out_data;
+
+uint32_t doublebuffer[AUDIO_BUFFER_SIZE*2];
+uint32_t * control[2] = {doublebuffer, &doublebuffer[AUDIO_BUFFER_SIZE]};
+
+float phase = 0.0f;
+float step = 2.0f * (float)M_PI * TONE_HZ / SAMPLE_RATE;
+
+void fillBufferSine(uint32_t * position){
+
+    for (int i = 0 ; i < AUDIO_BUFFER_SIZE; i++){
+        float s = sinf(phase) * 0.5f;
+        // scale it to 24 bit value
+        float scaled_val = s * SCALE;
+        // truncate it to 24 bit int, 32 bit but at the LSB end
+        int32_t scaled_val_int = (int32_t)scaled_val;
+        // Pack into 32-bit MSBs
+        uint32_t packed = ((uint32_t)scaled_val_int << 8);
+        position[i] = packed;
+        
+
+        phase += step;
+        if (phase > 2.0f * (float)M_PI)
+            phase -= 2.0f * (float)M_PI;
     }
+    
 
 }
+void dmahandler();
+
+
+void dmasetup(PIO pio, int sm){
+
+    // create 2 DMA channels
+    dma_out_ctrl = dma_claim_unused_channel(true);
+    dma_out_data = dma_claim_unused_channel(true);
+
+    //configure the data channel
+    dma_channel_config c = dma_channel_get_default_config(dma_out_ctrl);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_32);
+    channel_config_set_ring(&c, false, 3); // this means 64 bits before wrapping
+    channel_config_set_read_increment(&c, true);
+    channel_config_set_write_increment(&c, false);
+
+    dma_channel_configure(dma_out_ctrl,
+    &c,
+    &dma_hw->ch[dma_out_data].al3_read_addr_trig, //alias to read address trigger of data dma
+    control, // pointer to a pointer yo
+    AUDIO_BUFFER_SIZE,
+    false
+
+);
+
+    dma_channel_config d = dma_channel_get_default_config(dma_out_data);
+    channel_config_set_transfer_data_size(&d, DMA_SIZE_32);
+    channel_config_set_read_increment(&d, true);
+    channel_config_set_write_increment(&d, false);
+    channel_config_set_dreq(&d, pio_get_dreq(pio, sm, true));
+    channel_config_set_chain_to(&d, dma_out_ctrl);
+
+    dma_channel_configure(dma_out_data,
+    &d,
+    &pio->txf[sm],
+    NULL,
+    AUDIO_BUFFER_SIZE,
+    false
+);
+
+
+
+dma_channel_set_irq0_enabled(dma_out_data, true);
+irq_set_exclusive_handler(DMA_IRQ_0,dmahandler);
+irq_set_enabled(DMA_IRQ_0, true);
+
+
+
+dma_channel_start(dma_out_data);
+dma_channel_start(dma_out_ctrl);
+printf("dma init finished");
+
+}
+
+void dmahandler(){
+    
+  printf("irq: %d\n", dma_hw->ch[dma_out_ctrl].read_addr);
+    if(*(uint32_t**)dma_hw->ch[dma_out_ctrl].read_addr == doublebuffer){
+        fillBufferSine(doublebuffer);
+    }
+    else{
+        fillBufferSine(&doublebuffer[AUDIO_BUFFER_SIZE]);
+    }
+}
+
+
+
+
+
+
+
 
 void pio_i2s_init(PIO pio, uint sm, uint offset){
 
@@ -56,7 +159,7 @@ int main()
 
     pio_i2s_init(pio, sm, offset);
     pio_sm_set_enabled(pio,sm, true);
-    dataForever(pio, sm);
+    dmasetup(pio, sm);
 
     
 }

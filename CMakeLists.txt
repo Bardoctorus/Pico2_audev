@@ -51,6 +51,7 @@ pico_enable_stdio_usb(Pico2_audev 0)
 target_link_libraries(Pico2_audev
         pico_stdlib
         hardware_pio
+        hardware_dma
         )
 
 # Add the standard include files to the build

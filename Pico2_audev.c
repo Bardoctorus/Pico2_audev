@@ -24,7 +24,7 @@ int dma_out_ctrl;
 int dma_out_data;
 
 uint32_t doublebuffer[AUDIO_BUFFER_SIZE*2];
-uint32_t * control[2] = {doublebuffer, &doublebuffer[AUDIO_BUFFER_SIZE]};
+__attribute__ ((aligned(8))) uint32_t * control[2] = {doublebuffer, &doublebuffer[AUDIO_BUFFER_SIZE]};
 
 float phase = 0.0f;
 float step = 2.0f * (float)M_PI * TONE_HZ / SAMPLE_RATE;
@@ -69,10 +69,10 @@ void dmasetup(PIO pio, int sm){
     &c,
     &dma_hw->ch[dma_out_data].al3_read_addr_trig, //alias to read address trigger of data dma
     control, // pointer to a pointer yo
-    AUDIO_BUFFER_SIZE,
+    1,
     false
 
-);
+    );
 
     dma_channel_config d = dma_channel_get_default_config(dma_out_data);
     channel_config_set_transfer_data_size(&d, DMA_SIZE_32);
@@ -87,7 +87,7 @@ void dmasetup(PIO pio, int sm){
     NULL,
     AUDIO_BUFFER_SIZE,
     false
-);
+    );
 
 
 
@@ -97,7 +97,7 @@ irq_set_enabled(DMA_IRQ_0, true);
 
 
 
-dma_channel_start(dma_out_data);
+
 dma_channel_start(dma_out_ctrl);
 printf("dma init finished");
 
@@ -105,13 +105,17 @@ printf("dma init finished");
 
 void dmahandler(){
     
-  printf("irq: %d\n", dma_hw->ch[dma_out_ctrl].read_addr);
+  printf("irq: %d\n", dma_hw->ch[dma_out_data].read_addr);
     if(*(uint32_t**)dma_hw->ch[dma_out_ctrl].read_addr == doublebuffer){
         fillBufferSine(doublebuffer);
+        printf("irq: if\n");
     }
     else{
         fillBufferSine(&doublebuffer[AUDIO_BUFFER_SIZE]);
+        printf("irq: else\n");
+
     }
+    dma_hw->ints0 = 1u << dma_out_data;
 }
 
 
@@ -139,6 +143,8 @@ void pio_i2s_init(PIO pio, uint sm, uint offset){
     sm_config_set_out_shift(&c, false, true, 32); // shift OSR to left, true autopull, 32 bits
     sm_config_set_clkdiv(&c, 48.828125f); // correct value for 48k audio TODO: better cpu speed for div?
 
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
     pio_sm_init(pio, sm, offset, &c);
     pio_sm_set_pins_with_mask(
         pio,
@@ -160,6 +166,12 @@ int main()
     pio_i2s_init(pio, sm, offset);
     pio_sm_set_enabled(pio,sm, true);
     dmasetup(pio, sm);
+    //dmahandler();
+
+    while(true){
+        printf("fifo: %d\n", pio_sm_get_tx_fifo_level ( pio,  sm));
+        
+    }
 
     
 }

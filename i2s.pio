@@ -21,3 +21,12 @@ rightChan:
     out pins, 1         side 0b00 
 public entry_point:
     set x, 30           side 0b01
+
+
+
+.program piosck
+
+.wrap_target
+    set pins, 1 
+    set pins, 0
+.wrap

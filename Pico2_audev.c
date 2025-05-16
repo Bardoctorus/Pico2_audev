@@ -13,6 +13,7 @@
 #define DATA_OUT 6
 #define BCLK 7
 #define WS 8 // LCLK is another name this goes by - basically L/R audio trigger
+#define SCK 15
 // test sine wave defs
 #define SAMPLE_RATE 48000.0f
 #define TONE_HZ 440.0f
@@ -125,7 +126,21 @@ void dmahandler(){
 
 
 
-void pio_i2s_init(PIO pio, uint sm, uint offset){
+void pio_i2s_init(PIO pio, uint sm, uint smsck, uint offset,uint sckoffset){
+
+
+    // config sck sm
+    pio_gpio_init(pio, SCK);
+    
+    pio_sm_config d = i2s_program_get_default_config(sckoffset);
+    sm_config_set_set_pins(&d, SCK,1);
+    // 6.103515625
+    sm_config_set_clkdiv(&d, 600.103515625f); // should be correct for 512 * fs which may be way too fast.
+    pio_sm_set_consecutive_pindirs(pio, smsck, SCK, 1, true); // true = output
+    pio_sm_set_pins(pio, smsck, 1);
+
+    pio_sm_init(pio, smsck, sckoffset, &d);
+
 
     //set up pins for PIO use
     pio_gpio_init(pio, DATA_OUT);
@@ -150,26 +165,37 @@ void pio_i2s_init(PIO pio, uint sm, uint offset){
         pio,
         sm,
         0,
-        (1u << DATA_OUT) | (1u << BCLK) | (1u << WS)
+        (1u << DATA_OUT) | (1u << BCLK) | (1u << WS) 
     );
 
     pio_sm_exec(pio, sm, pio_encode_jmp(offset + i2s_offset_entry_point)); // points the program to start at our entry point.
+
+
+    
+
+
+
 }
 
 int main()
 {
     stdio_init_all();
     PIO pio = pio0;
-    uint sm = 0;
+    uint sm = pio_claim_unused_sm(pio, true);
+    uint smsck = pio_claim_unused_sm(pio, true);
     uint offset = pio_add_program(pio, &i2s_program);
+    uint sckoffset = pio_add_program(pio, &piosck_program);
 
-    pio_i2s_init(pio, sm, offset);
+    pio_i2s_init(pio, sm, smsck, offset, sckoffset);
     pio_sm_set_enabled(pio,sm, true);
+    pio_sm_set_enabled(pio,smsck, true);
+
     dmasetup(pio, sm);
     //dmahandler();
 
     while(true){
         printf("fifo: %d\n", pio_sm_get_tx_fifo_level ( pio,  sm));
+      
         
     }
 

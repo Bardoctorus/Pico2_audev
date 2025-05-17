@@ -10,6 +10,7 @@
 
 
 //i2s pindefs
+#define DATA_IN 9
 #define DATA_OUT 6
 #define BCLK 7
 #define WS 8 // LCLK is another name this goes by - basically L/R audio trigger
@@ -126,16 +127,17 @@ void dmahandler(){
 
 
 
-void pio_i2s_init(PIO pio, uint sm, uint smsck, uint offset,uint sckoffset){
+void pio_i2s_init(PIO pio, uint sm, uint smsck, uint smin, uint offset,uint sckoffset,uint inoffset){
 
 
     // config sck sm
     pio_gpio_init(pio, SCK);
     
     pio_sm_config d = i2s_program_get_default_config(sckoffset);
+    sm_config_set_wrap(&d,sckoffset+1,sckoffset+2); // not setting this = world of pain
     sm_config_set_set_pins(&d, SCK,1);
     
-    sm_config_set_clkdiv(&d, 150); // 6.103515625  should be correct for 512 * fs which may be way too fast.
+    sm_config_set_clkdiv(&d, 8.138020833333333); // 6.103515625  should be correct for 512 * fs which may be way too fast. or 8.138020833333333 for 384
     pio_sm_set_consecutive_pindirs(pio, smsck, SCK, 1, true); // true = output
     pio_sm_set_pins(pio, smsck, 0);
 
@@ -170,9 +172,20 @@ void pio_i2s_init(PIO pio, uint sm, uint smsck, uint offset,uint sckoffset){
 
     pio_sm_exec(pio, sm, pio_encode_jmp(offset + i2s_offset_entry_point)); // points the program to start at our entry point.
 
+// data in stuff on a hope and a prayer
 
-    
+pio_gpio_init(pio, DATA_IN);
+pio_sm_config i = i2s_program_get_default_config(inoffset);
+pio_sm_set_consecutive_pindirs(pio, smin, DATA_IN, 1, false);
+sm_config_set_in_pins(&i, DATA_IN);
+sm_config_set_in_shift(&i, true, true, 32); // assumption that right shift makes sense as its opposite to dac. Also autopush
+sm_config_set_clkdiv(&i, 48.828125f);
+sm_config_set_fifo_join(&i, PIO_FIFO_JOIN_RX);
+pio_sm_init(pio, smin, inoffset, &i);
+pio_sm_set_pins(pio, smin, 0);
 
+
+pio_sm_exec(pio, sm, pio_encode_jmp(inoffset + i2sin_offset_entry_point)); // points the program to start at our entry point.
 
 
 }
@@ -183,12 +196,16 @@ int main()
     PIO pio = pio0;
     uint sm = pio_claim_unused_sm(pio, true);
     uint smsck = pio_claim_unused_sm(pio, true);
+    uint smin = pio_claim_unused_sm(pio, true);
     uint offset = pio_add_program(pio, &i2s_program);
     uint sckoffset = pio_add_program(pio, &piosck_program);
+    uint inoffset = pio_add_program(pio, &i2sin_program);
 
-    pio_i2s_init(pio, sm, smsck, offset, sckoffset);
+    pio_i2s_init(pio, sm, smsck,smin, offset, sckoffset, inoffset);
     pio_sm_set_enabled(pio,sm, true);
     pio_sm_set_enabled(pio,smsck, true);
+    pio_sm_set_enabled(pio,smin, true);
+
 
     dmasetup(pio, sm);
     //dmahandler();

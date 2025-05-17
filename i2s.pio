@@ -23,12 +23,31 @@ public entry_point:
     set x, 30           side 0b01
 
 
+;jank in theorycraft program
+;idea being same as output but sharing sidesets from output
+;still 32 bit hoping we can ignore missing 8 bits.
+.program i2sin
+
+leftChan:
+    in pins, 1         
+    jmp x-- leftChan    
+    in pins, 1         
+    set x, 30           
+
+rightChan:
+    in pins, 1         
+    jmp x-- rightChan   
+    in pins, 1         
+public entry_point:
+    set x, 30           
+
+
 
 .program piosck
 
 set pindirs, 1
 
 .wrap_target
-    set pins, 1
-    set pins, 0
+    set pins, 1 
+    set pins, 0 
 .wrap

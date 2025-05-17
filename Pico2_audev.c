@@ -134,10 +134,10 @@ void pio_i2s_init(PIO pio, uint sm, uint smsck, uint offset,uint sckoffset){
     
     pio_sm_config d = i2s_program_get_default_config(sckoffset);
     sm_config_set_set_pins(&d, SCK,1);
-    // 6.103515625
-    sm_config_set_clkdiv(&d, 600.103515625f); // should be correct for 512 * fs which may be way too fast.
+    
+    sm_config_set_clkdiv(&d, 150); // 6.103515625  should be correct for 512 * fs which may be way too fast.
     pio_sm_set_consecutive_pindirs(pio, smsck, SCK, 1, true); // true = output
-    pio_sm_set_pins(pio, smsck, 1);
+    pio_sm_set_pins(pio, smsck, 0);
 
     pio_sm_init(pio, smsck, sckoffset, &d);
 
@@ -194,7 +194,7 @@ int main()
     //dmahandler();
 
     while(true){
-        printf("fifo: %d\n", pio_sm_get_tx_fifo_level ( pio,  sm));
+        //printf("fifo: %d\n", pio_sm_get_tx_fifo_level ( pio,  sm));
       
         
     }

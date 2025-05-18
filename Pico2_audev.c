@@ -25,8 +25,13 @@
 int dma_out_ctrl;
 int dma_out_data;
 
-uint32_t doublebuffer[AUDIO_BUFFER_SIZE*2];
-__attribute__ ((aligned(8))) uint32_t * control[2] = {doublebuffer, &doublebuffer[AUDIO_BUFFER_SIZE]};
+int dma_in_ctrl;
+int dma_in_data;
+
+uint32_t outputbuffer[AUDIO_BUFFER_SIZE*2];
+uint32_t inputbuffer[AUDIO_BUFFER_SIZE*2];
+__attribute__ ((aligned(8))) uint32_t * outputcontrol[2] = {outputbuffer, &outputbuffer[AUDIO_BUFFER_SIZE]};
+__attribute__ ((aligned(8))) uint32_t * inputcontrol[2] = {inputbuffer, &inputbuffer[AUDIO_BUFFER_SIZE]};
 
 float phase = 0.0f;
 float step = 2.0f * (float)M_PI * TONE_HZ / SAMPLE_RATE;
@@ -54,7 +59,7 @@ void fillBufferSine(uint32_t * position){
 void dmahandler();
 
 
-void dmasetup(PIO pio, int sm){
+void dmasetup(PIO pio, int sm, int smin){
 
     // create 2 DMA channels
     dma_out_ctrl = dma_claim_unused_channel(true);
@@ -69,20 +74,17 @@ void dmasetup(PIO pio, int sm){
 
     dma_channel_configure(dma_out_ctrl,
     &c,
-    &dma_hw->ch[dma_out_data].al3_read_addr_trig, //alias to read address trigger of data dma
-    control, // pointer to a pointer yo
+    &dma_hw->ch[dma_out_data].al3_read_addr_trig, //alias to read address trigger of data out dma
+    outputcontrol, // pointer to a pointer yo
     1,
     false
-
     );
-
     dma_channel_config d = dma_channel_get_default_config(dma_out_data);
     channel_config_set_transfer_data_size(&d, DMA_SIZE_32);
     channel_config_set_read_increment(&d, true);
     channel_config_set_write_increment(&d, false);
     channel_config_set_dreq(&d, pio_get_dreq(pio, sm, true));
     channel_config_set_chain_to(&d, dma_out_ctrl);
-
     dma_channel_configure(dma_out_data,
     &d,
     &pio->txf[sm],
@@ -91,30 +93,70 @@ void dmasetup(PIO pio, int sm){
     false
     );
 
+    dma_in_ctrl = dma_claim_unused_channel(true);
+    dma_in_data = dma_claim_unused_channel(true);
+    dma_channel_config e = dma_channel_get_default_config(dma_in_ctrl);
+    channel_config_set_transfer_data_size(&e, DMA_SIZE_32);
+    channel_config_set_ring(&e, false, 3); // this means 64 bits before wrapping //still a write, this time writing to write addr
+    channel_config_set_read_increment(&e, true);
+    channel_config_set_write_increment(&e, false);
+
+    dma_channel_configure(dma_in_ctrl,
+    &e,
+    &dma_hw->ch[dma_in_data].al2_write_addr_trig, //alias to write address trigger of data out dma
+    inputcontrol, //pointy pointy
+    1,
+    false
+);
+    dma_channel_config f = dma_channel_get_default_config(dma_in_data);
+    channel_config_set_transfer_data_size(&f, DMA_SIZE_32);
+    channel_config_set_read_increment(&f, false);
+    channel_config_set_write_increment(&f, true);
+    channel_config_set_dreq(&f, pio_get_dreq(pio, smin, false));
+    channel_config_set_chain_to(&f, dma_in_ctrl);
+
+    dma_channel_configure(dma_in_data,
+        &f,
+        NULL,
+        &pio->rxf[smin],
+        AUDIO_BUFFER_SIZE,
+        false
+    );
 
 
+
+//set up interrupts
 dma_channel_set_irq0_enabled(dma_out_data, true);
 irq_set_exclusive_handler(DMA_IRQ_0,dmahandler);
 irq_set_enabled(DMA_IRQ_0, true);
 
 
 
-
+//start dma ctrl channels
 dma_channel_start(dma_out_ctrl);
+dma_channel_start(dma_in_ctrl);
+
 printf("dma init finished");
 
 }
 
+void passthrough(uint32_t * input, uint32_t * output){
+    //take safe input, put in safe output
+    for (int i = 0 ; i < AUDIO_BUFFER_SIZE; i++){
+    input[i] = output[i];
+    }
+}
+
 void dmahandler(){
     
-  printf("irq: %d\n", dma_hw->ch[dma_out_data].read_addr);
-    if(*(uint32_t**)dma_hw->ch[dma_out_ctrl].read_addr == doublebuffer){
-        fillBufferSine(doublebuffer);
-        printf("irq: if\n");
+  //printf("irq: %d\n", dma_hw->ch[dma_out_data].read_addr);
+    if(*(uint32_t**)dma_hw->ch[dma_out_ctrl].read_addr == outputbuffer){
+        passthrough(inputbuffer, outputbuffer);
+        //printf("irq: if\n");
     }
     else{
-        fillBufferSine(&doublebuffer[AUDIO_BUFFER_SIZE]);
-        printf("irq: else\n");
+        passthrough(&inputbuffer[AUDIO_BUFFER_SIZE], &outputbuffer[AUDIO_BUFFER_SIZE]);
+       // printf("irq: else\n");
 
     }
     dma_hw->ints0 = 1u << dma_out_data;
@@ -207,7 +249,7 @@ int main()
     pio_sm_set_enabled(pio,smin, true);
 
 
-    dmasetup(pio, sm);
+    dmasetup(pio, sm, smin);
     //dmahandler();
 
     while(true){
